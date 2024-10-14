@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Reflection;
 using System.Linq.Expressions;
@@ -10,9 +10,10 @@ using UnityEngine.SceneManagement;
 using GorillaNetworking;
 using GorillaGameModes;
 using BepInEx;
-using HarmonyLib;
 
 using Utilla.Models;
+using System.Threading.Tasks;
+using Utilla.Utils;
 
 namespace Utilla
 {
@@ -22,21 +23,10 @@ namespace Utilla
 
 		const string BasePrefabPath = "CustomGameManager/";
 
-		public int PageCount => Mathf.CeilToInt(Gamemodes.Count() / 4f);
+		public int PageCount => Mathf.CeilToInt(Gamemodes.Count() / (float)GamemodeSelector.PageSize);
 
-		List<Gamemode> DefaultModdedGamemodes = new List<Gamemode>()
-		{
-			new Gamemode("MODDED_CASUAL", "MODDED CASUAL", BaseGamemode.Casual),
-			new Gamemode("MODDED_DEFAULT", "MODDED", BaseGamemode.Infection),
-			new Gamemode("MODDED_HUNT", "MODDED HUNT", BaseGamemode.Hunt),
-            new Gamemode("MODDED_BATTLE", "MODDED BRAWL", BaseGamemode.PaintbrawlBattle)
-        };
-		public List<Gamemode> Gamemodes { get; private set; } = new List<Gamemode>() { 
-			new Gamemode("CASUAL", "CASUAL"),
-			new Gamemode("INFECTION", "INFECTION"),
-			new Gamemode("HUNT", "HUNT"),
-            new Gamemode("BATTLE", "PAINTBRAWL")
-        };
+		List<Gamemode> DefaultModdedGamemodes;
+		public List<Gamemode> Gamemodes { get; private set; }
 
 		List<PluginInfo> pluginInfos;
 
@@ -56,61 +46,91 @@ namespace Utilla
 
 		GameObject moddedGameModesObject;
 
-		struct GameModeSelectorPath
+		Dictionary<string, GameModeSelectorPath> gameModeButtonsDict = new Dictionary<string, GameModeSelectorPath>() 
 		{
-			public string name;
-			public string buttonPath;
-			public string gamemodesPath;
-			public string transformToFind;
-		}
-
-		Dictionary<string, GameModeSelectorPath> gameModeButtonsDict = new Dictionary<string, GameModeSelectorPath>() {
 			{
 				"GorillaTag",
-				new GameModeSelectorPath() {
-					name = "TreehouseSelector",
-					buttonPath = "anchor",
-					gamemodesPath = "anchor",
-					transformToFind = "Environment Objects/LocalObjects_Prefab/TreeRoom/TreeRoomInteractables/UI/ModeSelector_Group/Selector Buttons"
+				new GameModeSelectorPath() 
+				{
+                    name = "StumpSelector",
+					transform = "Environment Objects/LocalObjects_Prefab/TreeRoom/TreeRoomInteractables/UI/GameModeSelector/Selector Buttons (1)",
+					anchorPath = "anchor",
                 }
 			},
 			{
-				"Beach",
-				new GameModeSelectorPath() {
-					name = "BeachSelector",
-					buttonPath = "modeselectbox (3)/anchor",
-					gamemodesPath = "UI FOR BEACH COMPUTER",
-					transformToFind = "Beach/BeachComputer"
+                "VirtualStump", // not a scene
+				new GameModeSelectorPath()
+				{
+					name = "VirtualStumpSelector",
+					transform = "Environment Objects/LocalObjects_Prefab/VirtualStump_CustomMapLobby/ModeSelector_Group/Selector Buttons",
+					anchorPath = "anchor"
+                }
+			},
+			{
+
+				"Cave",
+				new GameModeSelectorPath()
+				{
+					name = "CaveSelector",
+					transform = "Cave_Main_Prefab/CaveComputer/GameModeSelector/Selector Buttons (1)",
+					anchorPath = "anchor",
 				}
 			},
 			{   "Mountain",
-				new GameModeSelectorPath() {
+				new GameModeSelectorPath()
+				{
 					name = "MountainSelector",
-					buttonPath = "Geometry/goodigloo/modeselectbox (1)/anchor",
-					gamemodesPath = "UI/Text",
-					transformToFind = "Mountain"
+					transform = "Mountain/Geometry/goodigloo/GameModeSelector/Selector Buttons (1)",
+					anchorPath = "anchor",
 				}
 			},
 			{   "Skyjungle",
-				new GameModeSelectorPath() {
-					name = "SkySelector",
-					buttonPath = "anchor",
-					gamemodesPath = "ModeSelectorText",
-					transformToFind = "skyjungle/UI/-- Clouds ModeSelectBox UI --"
+				new GameModeSelectorPath()
+				{
+					name = "CloudsSelector",
+					transform = "skyjungle/UI/GameModeSelector/Selector Buttons (1)",
+					anchorPath = "anchor",
 				}
 			},
 			{
 				"Rotating",
-				new GameModeSelectorPath() {
+				new GameModeSelectorPath()
+				{
 					name = "RotatingSelector",
-					buttonPath = "anchor",
-					gamemodesPath = "ModeSelectorText",
-					transformToFind = "RotatingMap/SwampLevel/UI (1)/-- Rotating ModeSelectBox UI --"
-                }
-			}
-		};
+					transform = "RotatingPermanentEntrance/UI (1)/GameModeSelector/Selector Buttons (1)",
+					anchorPath = "anchor"
+				}
+			},
+			{
+				"Metropolis",
+				new GameModeSelectorPath()
+				{
+					name = "MetroSelector",
+					transform = "MetroMain/ComputerArea/GameModeSelector/Selector Buttons (1)",
+					anchorPath = "anchor"
+				}
+			},
+			{
+				"Beach",
+				new GameModeSelectorPath()
+				{
+					name = "BeachSelector",
+					transform = "Beach/BeachComputer (1)/GameModeSelector/Selector Buttons (1)",
+					anchorPath = "anchor"
+				}
+				},
+		           {
+					"Bayou",
+					new GameModeSelectorPath()
+					{
+						name = "BayouSelector",
+						transform = "BayouMain/ComputerArea/GameModeSelector/Selector Buttons (1)",
+						anchorPath = "anchor"
+					}
+					}
+					};
 
-		void Start()
+		public void Start()
 		{
 			Instance = this;
 			Events.RoomJoined += OnRoomJoin;
@@ -124,63 +144,92 @@ namespace Utilla
 
 			moddedGameModesObject = new GameObject("Modded Game Modes");
 			moddedGameModesObject.transform.SetParent(gtGameModeInstance.gameObject.transform);
-			// transform.parent = GameObject.Find(UIRootPath).transform;
 
-            GorillaComputer.instance.currentGameMode.Value = PlayerPrefs.GetString("currentGameMode", "INFECTION");
+			var currentGameMode = PlayerPrefs.GetString("currentGameMode", "INFECTION");
 
-			pluginInfos = GetPluginInfos();
+			GorillaComputer.instance.currentGameMode.Value = currentGameMode;
 
-			Gamemodes.AddRange(GetGamemodes(pluginInfos));
+            var defaultSelector = InitializeSelector(gameModeButtonsDict["GorillaTag"]);
+
+			defaultSelector.GetSelectorGamemodes(out var gamemodes, out DefaultModdedGamemodes);
+
+			Gamemodes = gamemodes;
+
+            pluginInfos = GetPluginInfos();
+
+            Gamemodes.AddRange(GetGamemodes(pluginInfos));
+
 			Gamemodes.ForEach(gamemode => AddGamemodeToPrefabPool(gamemode));
 
-			InitializeSelector(gameModeButtonsDict["GorillaTag"]);
+            UtillaLogging.Info($"Current Game Mode is set at {currentGameMode}.");
 
-			SceneManager.sceneLoaded += OnSceneChange;
+            var highlightedIndex = Gamemodes.FindIndex(gm => gm.ID == currentGameMode);
+
+			UtillaLogging.Info($"Highlighted index is set at {highlightedIndex}");
+
+            defaultSelector.ShowPage(highlightedIndex == -1 ? 0 : Mathf.FloorToInt(highlightedIndex / (float)GamemodeSelector.PageSize));
+
+            SceneManager.sceneLoaded += OnSceneChange;
+			Events.ForceLoadSelector += async (string path) => await TryLoadSelectorAsync(path);
 		}
 
-		void OnSceneChange(Scene scene, LoadSceneMode loadMode)
+		async void OnSceneChange(Scene scene, LoadSceneMode loadMode)
 		{
-			if (gameModeButtonsDict.TryGetValue(scene.name, out var buttonData))
+			bool result = await TryLoadSelectorAsync(scene.name);
+			if (result)
 			{
-				InitializeSelector(buttonData);
+				UtillaLogging.Log($"Loaded selector for scene {scene.name}");
+			}
+			else
+			{
+				UtillaLogging.Warning($"Selector could not be found for scene {scene.name}! (was there none made for this scene? has the name of the scene been modified?)");
 			}
 		}
 
-		// void InitializeSelector(string name, Transform parent, string buttonPath, string gamemodesPath)
-		void InitializeSelector(GameModeSelectorPath gmPathData)
+        async Task<bool> TryLoadSelectorAsync(string path)
+		{
+            if (gameModeButtonsDict.TryGetValue(path, out var buttonData))
+            {
+                await Task.Delay(100);
+                InitializeSelector(buttonData);
+				return true;
+            }
+			return false;
+        }
+
+        GamemodeSelector InitializeSelector(GameModeSelectorPath gmPathData)
 		{
 			try
 			{
-				Transform parent = GameObject.Find(gmPathData.transformToFind)?.transform;
-				var selector = new GameObject(gmPathData.name).AddComponent<GamemodeSelector>();
+				Transform parent = GameObject.Find(gmPathData.transform)?.transform;
+
+                GamemodeSelector selector = new GameObject($"{gmPathData.name} (Utilla)").AddComponent<GamemodeSelector>();
+
+				Transform anchor = parent.Find(gmPathData.anchorPath);
 
 				// child objects might be removed when gamemodes is released, keeping default behaviour for now
-				var ButtonParent = parent.Find(gmPathData.buttonPath);
-				foreach(Transform child in ButtonParent) {
+				Transform buttonLayout = null;
+
+				foreach(Transform child in anchor) 
+				{
 					if (child.gameObject.name.StartsWith("ENABLE FOR BETA"))
 					{
-						ButtonParent = child;
+                        buttonLayout = child;
 						break;
 					}
 				}
 
-				// gameobject name for the text object changed but might change back after gamemodes is released
-				var GamemodesList = parent.Find(gmPathData.gamemodesPath);
-				foreach (Transform child in GamemodesList) {
-					if (child.gameObject.name.StartsWith("Game Mode List Text ENABLE FOR BETA"))
-					{
-						GamemodesList = child;
-						break;
-					}
-				}
+				selector.Initialize(parent, anchor, buttonLayout);
 
-				selector.Initialize(parent, ButtonParent, GamemodesList);
+				return selector;
 			}
-			catch (Exception e)
+
+            catch (Exception e)
 			{
-				Debug.LogError($"Utilla: Failed to initialize {name}: {e}");
+				UtillaLogging.Error($"GamemodeSelector with name {name} could not be initialized: {e}");
 			}
 
+			return null;
 		}
 
 		List<Gamemode> GetGamemodes(List<PluginInfo> infos)
@@ -290,21 +339,14 @@ namespace Utilla
 			if (gamemode.GameManager is null) return;
             if (gtGameModeKeyByName.ContainsKey(gamemode.GamemodeString) || gtGameModeKeyByName.ContainsKey(gamemode.DisplayName))
             {
-                Debug.LogError($"game with name \"{gamemode.GamemodeString}\" or \"{gamemode.DisplayName}\" already exists");
+				UtillaLogging.Error($"Game Mode with name '{gamemode.GamemodeString}' or '{gamemode.DisplayName}' already exists.");
                 return;
             }
 
 			Type gmType = gamemode.GameManager;
 			if (gmType == null || !gmType.IsSubclassOf(typeof(GorillaGameManager)))
 			{
-				GameModeType? gmKey = gamemode.BaseGamemode switch
-				{
-					BaseGamemode.Casual => GameModeType.Casual,
-					BaseGamemode.Infection => GameModeType.Infection,
-					BaseGamemode.Hunt => GameModeType.Hunt,
-					BaseGamemode.PaintbrawlBattle => GameModeType.Battle,
-					_ => null
-				};
+				GameModeType? gmKey = BaseGamemodeUtils.GetGameModeType(gamemode.BaseGamemode);
 
 				if (gmKey == null)
 				{
@@ -324,7 +366,7 @@ namespace Utilla
 
 			if (gtGameModeTable.ContainsKey(gameModeKey))
 			{
-				Debug.LogError($"GameMode {gtGameModeTable[gameModeKey].GameModeName()} is already using GameType {gameModeKey}");
+				UtillaLogging.Error($"Game Mode with name '{gtGameModeTable[gameModeKey].GameModeName()}' is already using GameType '{gameModeKey}'.");
 				GameObject.Destroy(prefab);
 				return;
 			}
@@ -344,8 +386,11 @@ namespace Utilla
 		{
 			string gamemode = args.Gamemode;
 
+			UtillaLogging.Info($"Game Mode is set as {gamemode}");
+
 			foreach (var pluginInfo in pluginInfos)
 			{
+				UtillaLogging.Info(string.Join(", ", pluginInfo.Gamemodes.Select(gm => gm.GamemodeString)));
 				if (pluginInfo.Gamemodes.Any(x => gamemode.Contains(x.GamemodeString)))
 				{
 					try
